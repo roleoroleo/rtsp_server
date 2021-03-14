@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <errno.h>
+#include <limits.h>
 
 #include <sys/ioctl.h>
 #include <pthread.h>
@@ -13,6 +14,8 @@
 #include <net/if.h>
 
 #include <arpa/inet.h>
+
+#include <getopt.h>
 
 #include "rtsp_server.h"
 #include "capture.h"
@@ -160,6 +163,12 @@ unsigned char VPS5_1920X1080_TI[]  = {0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0C, 
                                       0x00, 0x03, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03,
                                       0x00, 0x7B, 0xAC, 0x0C, 0x00, 0x00, 0x0F, 0xA4,
                                       0x00, 0x01, 0x38, 0x81, 0x40};
+
+int model;
+//int resolution;
+int audio;
+int port;
+//int debug;
 
 static char const* dateHeader()
 {
@@ -359,22 +368,24 @@ int DescribeAnswer(char *cseq, int sock, char *urlSuffix, char *recvbuf)
         pTemp2 += sprintf(pTemp2,"a=control:trackID=0\r\n");
         pTemp2 += sprintf(pTemp2,"a=rtpmap:96 H264/90000\r\n");
         pTemp2 += sprintf(pTemp2,"a=fmtp:96 packetization-mode=1; sprop-parameter-sets=%s\r\n", "AAABBCCC");
-#if 1
-        /*G726*/
-        pTemp2 += sprintf(pTemp2,"m=audio 0 RTP/AVP 97\r\n");
-        pTemp2 += sprintf(pTemp2,"a=control:trackID=1\r\n");
-        if (strcmp(g_rtp_playload,"AAC")==0) {
-            pTemp2 += sprintf(pTemp2,"a=rtpmap:97 MPEG4-GENERIC/%d/2\r\n",16000);
-            pTemp2 += sprintf(pTemp2,"a=fmtp:97 streamtype=5;profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=1410\r\n");
-        } else if (strcmp(g_rtp_playload,"PCM")==0) {
-            pTemp2 += sprintf(pTemp2,"a=rtpmap:97 L16/%d\r\n", 16000);
-        } else if (strcmp(g_rtp_playload,"PCMA")==0) {
-            pTemp2 += sprintf(pTemp2,"a=rtpmap:97 PCMA/%d\r\n", 16000);
-        } else {
-            pTemp2 += sprintf(pTemp2,"a=rtpmap:97 G726-32/%d/1\r\n",8000);
-            pTemp2 += sprintf(pTemp2,"a=fmtp:97 packetization-mode=1\r\n");
+
+        if (audio) {
+            /*Audio TrackID=1 RTP_PT 97*/
+            pTemp2 += sprintf(pTemp2,"m=audio 0 RTP/AVP 97\r\n");
+            pTemp2 += sprintf(pTemp2,"a=control:trackID=1\r\n");
+            if (strcmp(g_rtp_playload,"AAC")==0) {
+                pTemp2 += sprintf(pTemp2,"a=rtpmap:97 MPEG4-GENERIC/%d/2\r\n",16000);
+                pTemp2 += sprintf(pTemp2,"a=fmtp:97 streamtype=5;profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=1410\r\n");
+            } else if (strcmp(g_rtp_playload,"PCM")==0) {
+                pTemp2 += sprintf(pTemp2,"a=rtpmap:97 L16/%d\r\n", 16000);
+            } else if (strcmp(g_rtp_playload,"PCMA")==0) {
+                pTemp2 += sprintf(pTemp2,"a=rtpmap:97 PCMA/%d\r\n", 16000);
+            } else {
+                pTemp2 += sprintf(pTemp2,"a=rtpmap:97 G726-32/%d/1\r\n",8000);
+                pTemp2 += sprintf(pTemp2,"a=fmtp:97 packetization-mode=1\r\n");
+            }
         }
-#endif
+
         pTemp += sprintf(pTemp,"Content-length: %d\r\n", strlen(sdpMsg));
         pTemp += sprintf(pTemp,"Content-Base: rtsp://%s/%s/\r\n\r\n",localip,urlSuffix);
 
@@ -756,15 +767,15 @@ void * RtspServerListen(void*pParam)
 
 int32_t VENC_Sent_V(char *buffer,int buflen)
 {
-    int is=0;
-    int nChanNum=0;
+    int is = 0;
+    int nChanNum = 0;
     for (is = 0; is < MAX_RTSP_CLIENT; is++) {
-        if (g_rtspClients[is].status!=RTSP_SENDING) {
+        if (g_rtspClients[is].status != RTSP_SENDING) {
             continue;
         }
         int heart = g_rtspClients[is].seqnum % 1000;
 
-        if(heart==0) {
+        if(heart == 0) {
             printf("Heart[%d] %d\n", is, g_rtspClients[is].seqnum);
         }
 
@@ -893,15 +904,15 @@ int32_t VENC_Sent_V(char *buffer,int buflen)
 
 int32_t VENC_Sent_A(char *buffer, int buflen)
 {
-    int is=0;
-    int nChanNum=0;
+    int is = 0;
+    int nChanNum = 0;
     for (is = 0; is < MAX_RTSP_CLIENT; is++) {
         if (g_rtspClients[is].status != RTSP_SENDING) {
             continue;
         }
         int heart = g_rtspClients[is].seqnum2 % 1000;
 
-        if(heart==0) {
+        if(heart == 0) {
             printf("Heart[%d] %d\n", is, g_rtspClients[is].seqnum2);
         }
 
@@ -1002,7 +1013,7 @@ void *capture_video(void *ptr)
     pstPara = (SAMPLE_VENC_GETSTREAM_PARA_S*) ptr;
 
     udpfd = socket(AF_INET, SOCK_DGRAM, 0); // UDP
-    printf("udp up\n");
+    printf("udp video socket ready\n");
 
     // Opening an existing file
     fFid = fopen(input_buffer.filename, "r");
@@ -1065,17 +1076,6 @@ void *capture_video(void *ptr)
 //        if (debug & 1) fprintf(stderr, "found buf_idx_2: %08x\n", (unsigned int) buf_idx_2);
 
         if ((write_enable) && (sps_sync)) {
-//            if (frame_res == RESOLUTION_LOW) {
-//                cb_current = &output_buffer_low;
-//            } else if (frame_res == RESOLUTION_HIGH) {
-//                cb_current = &output_buffer_high;
-//            } else {
-//                cb_current = NULL;
-//            }
-
-//            char nalu[65535*2];
-//            int nalu_len;
-
             if (frame_res == RESOLUTION_HIGH) {
 //                if (debug & 1) fprintf(stderr, "%lld: frame_len: %d - cb_current->size: %d\n", current_timestamp(), frame_len, cb_current->size);
                 if (frame_len > sizeof(nalu)) {
@@ -1278,7 +1278,7 @@ void *capture_audio(void *ptr)
     pstPara = (SAMPLE_VENC_GETSTREAM_PARA_S*) ptr;
 
     udpfd2 = socket(AF_INET, SOCK_DGRAM, 0); // UDP
-    printf("udp2 up\n");
+    printf("udp audio socket ready\n");
 
     FILE* fFid = fopen(AUDIO_FIFO_FILE, "r");
     if (fFid == NULL)
@@ -1381,7 +1381,9 @@ void InitRtspServer()
 
     int32_t s32Ret;
     s32Ret = thread_get_picture();
-    s32Ret = thread_get_audio();
+    if (audio) {
+        s32Ret = thread_get_audio();
+    }
 }
 
 int loop()
@@ -1392,22 +1394,162 @@ int loop()
     return 0;
 }
 
-/*****************************************************************
-  Function:       Èë¿Úµãº¯Êý
-  Description:   ÓŠÓÃ³ÌÐòÈë¿Úµã
-  Input:        argc,    ²ÎÊýžöÊý
-              argv,    ²ÎÊý×Ö·ûŽ®ÖžÕëÊý×é
-  Return:        ²Ù×÷³É¹Š£¬Ôò·µ»Ø0£¬ÎÞÔò·µ»Ø<0
+void print_usage(char *progname)
+{
+    fprintf(stderr, "\nUsage: %s [-r RES] [-p PORT] [-d]\n\n", progname);
+    fprintf(stderr, "\t-m MODEL, --model MODEL\n");
+    fprintf(stderr, "\t\tset model: y21ga, r30gb or h52ga (default y21ga)\n");
+//    fprintf(stderr, "\t-r RES,   --resolution RES\n");
+//    fprintf(stderr, "\t\tset resolution: low, high or both (default high)\n");
+    fprintf(stderr, "\t-a AUDIO, --audio AUDIO\n");
+    fprintf(stderr, "\t\tset audio: yes, no (default yes)\n");
+    fprintf(stderr, "\t-p PORT,  --port PORT\n");
+    fprintf(stderr, "\t\tset TCP port (default 554)\n");
+//    fprintf(stderr, "\t-d DEBUG, --debug DEBUG\n");
+//    fprintf(stderr, "\t\t0 none, 1 grabber, 2 rtsp library or 3 both\n");
+    fprintf(stderr, "\t-h,       --help\n");
+    fprintf(stderr, "\t\tprint this help\n");
+}
 
-******************************************************************/
 int main(int argc, char* argv[])
 {
-    buf_offset = BUF_OFFSET_Y21GA;
-    buf_size = BUF_SIZE_Y21GA;
-    frame_header_size = FRAME_HEADER_SIZE_Y21GA;
-    data_offset = DATA_OFFSET_Y21GA;
-    lowres_byte = LOWRES_BYTE_Y21GA;
-    highres_byte = HIGHRES_BYTE_Y21GA;
+    int c;
+    char *endptr;
+
+    // Setting default
+    model = Y21GA;
+//    resolution = RESOLUTION_HIGH;
+    audio = 1;
+    port = 554;
+//    debug = 0;
+
+    while (1) {
+        static struct option long_options[] =
+        {
+            {"model",  required_argument, 0, 'm'},
+//            {"resolution",  required_argument, 0, 'r'},
+            {"audio",  required_argument, 0, 'a'},
+            {"port",  required_argument, 0, 'p'},
+//            {"debug",  required_argument, 0, 'd'},
+            {"help",  no_argument, 0, 'h'},
+            {0, 0, 0, 0}
+        };
+        /* getopt_long stores the option index here. */
+        int option_index = 0;
+
+//        c = getopt_long (argc, argv, "m:r:a:p:d:h",
+        c = getopt_long (argc, argv, "m:a:p:h",
+                         long_options, &option_index);
+
+        /* Detect the end of the options. */
+        if (c == -1)
+            break;
+
+        switch (c) {
+        case 'm':
+            if (strcasecmp("y21ga", optarg) == 0) {
+                model = Y21GA;
+            } else if (strcasecmp("r30gb", optarg) == 0) {
+                model = R30GB;
+            } else if (strcasecmp("h52ga", optarg) == 0) {
+                model = H52GA;
+            }
+            break;
+
+/*        case 'r':
+            if (strcasecmp("low", optarg) == 0) {
+                resolution = RESOLUTION_LOW;
+            } else if (strcasecmp("high", optarg) == 0) {
+                resolution = RESOLUTION_HIGH;
+            } else if (strcasecmp("both", optarg) == 0) {
+                resolution = RESOLUTION_BOTH;
+            }
+            break;*/
+
+        case 'a':
+            if (strcasecmp("no", optarg) == 0) {
+                audio = 0;
+            } else if (strcasecmp("yes", optarg) == 0) {
+                audio = 1;
+            }
+            break;
+
+        case 'p':
+            errno = 0;    /* To distinguish success/failure after call */
+            port = strtol(optarg, &endptr, 10);
+
+            /* Check for various possible errors */
+            if ((errno == ERANGE && (port == LONG_MAX || port == LONG_MIN)) || (errno != 0 && port == 0)) {
+                print_usage(argv[0]);
+                exit(EXIT_FAILURE);
+            }
+            if (endptr == optarg) {
+                print_usage(argv[0]);
+                exit(EXIT_FAILURE);
+            }
+            break;
+
+/*        case 'd':
+            errno = 0;    // To distinguish success/failure after call
+            debug = strtol(optarg, &endptr, 10);
+
+            // Check for various possible errors
+            if ((errno == ERANGE && (debug == LONG_MAX || debug == LONG_MIN)) || (errno != 0 && debug == 0)) {
+                print_usage(argv[0]);
+                exit(EXIT_FAILURE);
+            }
+            if (endptr == optarg) {
+                print_usage(argv[0]);
+                exit(EXIT_FAILURE);
+            }
+            if ((debug < 0) || (debug > 3)) {
+                print_usage(argv[0]);
+                exit(EXIT_FAILURE);
+            }
+            fprintf (stderr, "debug on, level %d\n", debug);
+            break;*/
+
+        case 'h':
+            print_usage(argv[0]);
+            return -1;
+            break;
+
+        case '?':
+            /* getopt_long already printed an error message. */
+            break;
+
+        default:
+            print_usage(argv[0]);
+            return -1;
+        }
+    }
+
+    printf("model: %s\n", ((model==Y21GA)?"y21ga":((model==R30GB)?"r30gb":"h52ga")));
+    printf("audio: %s\n", ((audio==1)?"yes":"no"));
+    printf("port:  %d\n", port);
+
+    if (model == Y21GA) {
+        buf_offset = BUF_OFFSET_Y21GA;
+        buf_size = BUF_SIZE_Y21GA;
+        frame_header_size = FRAME_HEADER_SIZE_Y21GA;
+        data_offset = DATA_OFFSET_Y21GA;
+        lowres_byte = LOWRES_BYTE_Y21GA;
+        highres_byte = HIGHRES_BYTE_Y21GA;
+    } else if (model == R30GB) {
+        buf_offset = BUF_OFFSET_R30GB;
+        buf_size = BUF_SIZE_R30GB;
+        frame_header_size = FRAME_HEADER_SIZE_R30GB;
+        data_offset = DATA_OFFSET_R30GB;
+        lowres_byte = LOWRES_BYTE_R30GB;
+        highres_byte = HIGHRES_BYTE_R30GB;
+    } else if (model == H52GA) {
+        buf_offset = BUF_OFFSET_H52GA;
+        buf_size = BUF_SIZE_H52GA;
+        frame_header_size = FRAME_HEADER_SIZE_H52GA;
+        data_offset = DATA_OFFSET_H52GA;
+        lowres_byte = LOWRES_BYTE_H52GA;
+        highres_byte = HIGHRES_BYTE_H52GA;
+    }
 
     // Fill input and output buffer struct
     strcpy(input_buffer.filename, BUFFER_FILE);
